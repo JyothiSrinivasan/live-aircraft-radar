@@ -10,7 +10,7 @@ HYD_LAT = 17.2403
 HYD_LON = 78.4294
 RADIUS_KM = 463
 RADIUS_NM = min(250, int(round(RADIUS_KM / 1.852)))
-REFRESH_SECONDS = 10
+REFRESH_SECONDS = 60
 
 # Map 3-letter ICAO airline callsign prefixes to (Airline Name, Hex Color)
 AIRLINE_COLORS = {
