@@ -5,12 +5,16 @@ import threading
 import time
 import os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
+REFRESH_SECONDS = 300  # 5 minutes: at most 288 requests in 24 hours
 
 HYD_LAT = 17.2403
 HYD_LON = 78.4294
 RADIUS_KM = 463
 RADIUS_NM = min(250, int(round(RADIUS_KM / 1.852)))
-REFRESH_SECONDS = 60
+
 
 # Map 3-letter ICAO airline callsign prefixes to (Airline Name, Hex Color)
 AIRLINE_COLORS = {
@@ -30,40 +34,63 @@ def get_airline_info(callsign):
     prefix = callsign[:3].upper() if len(callsign) >= 3 else ""
     return AIRLINE_COLORS.get(prefix, DEFAULT_AIRLINE)
 
+def retry_after_seconds(value):
+    """Parse Retry-After as seconds or an HTTP date."""
+    if value:
+        try:
+            return max(60, int(value))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(value)
+                return max(
+                    60,
+                    int((retry_at - datetime.now(timezone.utc)).total_seconds())
+                )
+            except (TypeError, ValueError):
+                pass
+
+    # If the header is missing, wait until after the daily UTC reset.
+    now = datetime.now(timezone.utc)
+    return max(60, 24 * 3600 - (now.hour * 3600 + now.minute * 60 + now.second) + 60)
+
 def get_live_aircraft(lat, lon, radius_nm=250):
-    subdomain = "api"
-    domain = "adsb.lol"
-    version = "v2"
-    endpoint = "point"
-    
-    url = f"https://{subdomain}.{domain}/{version}/{endpoint}/{lat}/{lon}/{radius_nm}"
+    url = f"https://api.adsb.lol/v2/point/{lat}/{lon}/{radius_nm}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Python-ADS-B-Tracker/1.0"
+        "User-Agent": "Python-ADS-B-Tracker/1.0"
     }
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 429:
+            wait = retry_after_seconds(response.headers.get("Retry-After"))
+            print(f"API rate limit reached. Retrying in {wait // 60} minutes.")
+            return None, wait
+
         response.raise_for_status()
         data = response.json()
-        
+
         aircraft_list = []
         for ac in data.get("ac", []):
-            if "lat" in ac and "lon" in ac:
-                aircraft_list.append({
-                    "icao24": ac.get("hex", "N/A"),
-                    "callsign": ac.get("flight", "N/A").strip() or "N/A",
-                    "aircraft_type": ac.get("t", "N/A"),
-                    "latitude": ac["lat"],
-                    "longitude": ac["lon"],
-                    "altitude_ft": ac.get("alt_baro", "N/A"),
-                    "speed_knots": ac.get("gs", "N/A"),
-                    "heading": ac.get("track") or 0
-                })
-        return aircraft_list
+            if "lat" not in ac or "lon" not in ac:
+                continue
 
-    except requests.exceptions.RequestException as e:
+            aircraft_list.append({
+                "icao24": ac.get("hex", "N/A"),
+                "callsign": (ac.get("flight") or "N/A").strip() or "N/A",
+                "aircraft_type": ac.get("t", "N/A"),
+                "latitude": ac["lat"],
+                "longitude": ac["lon"],
+                "altitude_ft": ac.get("alt_baro", "N/A"),
+                "speed_knots": ac.get("gs", "N/A"),
+                "heading": ac.get("track") or 0
+            })
+
+        return aircraft_list, REFRESH_SECONDS
+
+    except (requests.exceptions.RequestException, ValueError) as e:
         print(f"Error fetching flight data: {e}")
-        return []
+        return None, REFRESH_SECONDS
 
 def create_rotated_plane_icon(heading, color):
     html = f"""
@@ -141,8 +168,8 @@ def plot_flights_on_map(flights, center_lat, center_lon):
     # Add the interactive filter panel (kept open by default with collapsed=False)
     folium.LayerControl(position="topright", collapsed=False).add_to(flight_map)
 
-    #auto_refresh_tag = f'<meta http-equiv="refresh" content="{REFRESH_SECONDS}">'
-    #flight_map.get_root().header.add_child(folium.Element(auto_refresh_tag))
+    auto_refresh_tag = f'<meta http-equiv="refresh" content="{REFRESH_SECONDS}">'
+    flight_map.get_root().header.add_child(folium.Element(auto_refresh_tag))
 
     flight_map.save("live_flights_temp.html")
     os.replace("live_flights_temp.html", "live_flights.html")
@@ -166,15 +193,24 @@ if __name__ == "__main__":
 
     try:
         while True:
-            flights = get_live_aircraft(HYD_LAT, HYD_LON, radius_nm=RADIUS_NM)
-            plot_flights_on_map(flights, HYD_LAT, HYD_LON)
-            print(f"[{time.strftime('%H:%M:%S')}] Updated map with {len(flights)} active aircraft.")
+            flights, wait_seconds = get_live_aircraft(
+                HYD_LAT, HYD_LON, radius_nm=RADIUS_NM
+            )
 
-            if not browser_opened:
+            if flights is not None:
+                plot_flights_on_map(flights, HYD_LAT, HYD_LON)
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] "
+                    f"Updated map with {len(flights)} active aircraft."
+                )
+            else:
+                print("Keeping the last successful map; no new data available.")
+
+            if not browser_opened and os.path.exists("live_flights.html"):
                 webbrowser.open(url)
                 browser_opened = True
 
-            time.sleep(REFRESH_SECONDS)
+            time.sleep(wait_seconds)
 
     except KeyboardInterrupt:
         print("\nRadar stopped.")
