@@ -141,8 +141,8 @@ def plot_flights_on_map(flights, center_lat, center_lon):
     # Add the interactive filter panel (kept open by default with collapsed=False)
     folium.LayerControl(position="topright", collapsed=False).add_to(flight_map)
 
-    auto_refresh_tag = f'<meta http-equiv="refresh" content="{REFRESH_SECONDS}">'
-    flight_map.get_root().header.add_child(folium.Element(auto_refresh_tag))
+    #auto_refresh_tag = f'<meta http-equiv="refresh" content="{REFRESH_SECONDS}">'
+    #flight_map.get_root().header.add_child(folium.Element(auto_refresh_tag))
 
     flight_map.save("live_flights_temp.html")
     os.replace("live_flights_temp.html", "live_flights.html")
