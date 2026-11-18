@@ -2,6 +2,7 @@
 
 A real-time ADS-B aircraft radar built with Python and Folium. It fetches live flight telemetry from the [adsb.lol API](https://adsb.lol) and plots active aircraft within a **463 km (250 NM)** radius around Hyderabad, India, featuring an interactive airline filter sidebar, live per-airline flight counts, directional aircraft icons, and automatic 10-second updates.
 
+<img width="1876" height="1080" alt="Screenshot 2026-11-19 004019" src="https://github.com/user-attachments/assets/2f67b604-9c2a-44b2-b5ac-396baac07e7b" />
 
 ## Features
 
@@ -50,10 +51,6 @@ HYD_LON = 78.4294        # Center longitude
 RADIUS_KM = 463          # Radar radius in kilometers (max 463 km / 250 NM)
 REFRESH_SECONDS = 10     # Map refresh interval in seconds
 ```
-
-## Screenshot
-
-![Live Aircraft Radar Preview](screenshot.png)
 
 ## License
 
